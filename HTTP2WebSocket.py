@@ -60,7 +60,7 @@ class proxyServer(BaseHTTPRequestHandler):
     def ws_request(self, url, content):
         """Send web socket request based on HTTP request"""
 
-        global TARGET, SECURE, PROXY, DELAY, CONNECTION, CONN_START, KEEP
+        global TARGET, SECURE, PROXY, DELAY, CONNECTION, CONN_START, KEEP, WAIT
         # Prepare proxy if provided
         if PROXY:
             proxy = self.proxy_prepare(PROXY)
@@ -100,11 +100,11 @@ class proxyServer(BaseHTTPRequestHandler):
         if CONNECTION is None or not CONNECTION.connected:
             try:
                 if proxy:
-                    CONNECTION = create_connection('{}{}'.format(target, url), http_proxy_host=proxy[0], http_proxy_port=proxy[1], sslopt=context, header=headers)
+                    CONNECTION = create_connection('{}{}'.format(target, url), http_proxy_host=proxy[0], http_proxy_port=proxy[1], sslopt=context, header=headers, timeout=WAIT)
                     CONN_START = datetime.now()
                     sleep(DELAY)
                 else:
-                    CONNECTION = create_connection('{}{}'.format(target, url), sslopt=context, header=headers)
+                    CONNECTION = create_connection('{}{}'.format(target, url), sslopt=context, header=headers, timeout=WAIT)
                     CONN_START = datetime.now()
                     sleep(DELAY)
             except _exceptions.WebSocketBadStatusException as error:
@@ -126,8 +126,13 @@ class proxyServer(BaseHTTPRequestHandler):
                 return {'error': error}
 
         CONNECTION.send(content)
-        response = CONNECTION.recv()
-        # CONNECTION.close()
+        response = ''
+        try:
+            while True:
+                response += CONNECTION.recv() + '\n'
+        except _exceptions.WebSocketTimeoutException as error:
+            pass
+
         return response
 
     def proxy_prepare(self, proxy=None):
@@ -166,6 +171,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='HTTP2WebSocket is Python 3 Web Socket Proxy tool to translate HTTP traffic to WebSocket application. It allows to test WebSocket app with tools like sqlmap, dirb, commix. Headers sent by you will be passed to Web Socket application.')
     parser.add_argument('-l','--listen', help='Local port to listen to.', type=int, required=True)
     parser.add_argument('-t','--target', help='Your target WebSocket application (E.g.: ws://localhost:1234)')
+    parser.add_argument('-w', '--wait', help='Wait specific amount of seconds for WS responses', type=int, default=1)
     parser.add_argument('-K', '--keep', help='Keep the connection open for provided amount of seconds', type=int, default=3)
     parser.add_argument('-d', '--delay', help='The delay between opening a WS connection and sending a request', type=int, default=0)
     parser.add_argument('-P','--parameter', help='Artificial parameter for POST body. Actual content sent will be the value of this parameter. Some tools (ex: fimap) don\'t work with plain body without any parameters.')
@@ -176,6 +182,7 @@ if __name__ == '__main__':
 
     CONNECTION = None
     CONN_START = 0
+    WAIT = args.wait
     TARGET = args.target
     KEEP = args.keep
     DELAY = args.delay
