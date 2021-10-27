@@ -5,6 +5,7 @@
 
 import argparse
 import ssl
+from time import sleep
 from websocket import create_connection, _exceptions
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -56,7 +57,7 @@ class proxyServer(BaseHTTPRequestHandler):
     def ws_request(self, url, content):
         """Send web socket request based on HTTP request"""
 
-        global TARGET, SECURE, PROXY
+        global TARGET, SECURE, PROXY, DELAY
         # Prepare proxy if provided
         if PROXY:
             proxy = self.proxy_prepare(PROXY)
@@ -113,6 +114,7 @@ class proxyServer(BaseHTTPRequestHandler):
             print('[-] SSL Error: {}'.format(error))
             return {'error': error}
 
+        sleep(DELAY)
         ws.send(content)
         response = ws.recv()
         ws.close()
@@ -154,6 +156,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='HTTP2WebSocket is Python 3 Web Socket Proxy tool to translate HTTP traffic to WebSocket application. It allows to test WebSocket app with tools like sqlmap, dirb, commix. Headers sent by you will be passed to Web Socket application.')
     parser.add_argument('-l','--listen', help='Local port to listen to.', type=int, required=True)
     parser.add_argument('-t','--target', help='Your target WebSocket application (E.g.: ws://localhost:1234)')
+    parser.add_argument('-d', '--delay', help='The delay between opening a WS connection and sending a request', type=int, default=0)
     parser.add_argument('-P','--parameter', help='Artificial parameter for POST body. Actual content sent will be the value of this parameter. Some tools (ex: fimap) don\'t work with plain body without any parameters.')
     parser.add_argument('-v','--verbose', default=False, action='store_true', help='Shows HTTP POST body message.')
     parser.add_argument('-k','--insecure', default=False, action='store_true', help='Don\'t verify SSL certificate.')
@@ -161,6 +164,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     TARGET = args.target
+    DELAY = args.delay
     PARAMETER = args.parameter+'=' if args.parameter is not None else ''
     VERBOSE = args.verbose
     SECURE = not args.insecure
