@@ -4,7 +4,10 @@
 """
 
 import argparse
+import time
 import ssl
+
+from datetime import datetime, timedelta
 from time import sleep
 from websocket import create_connection, _exceptions
 
@@ -57,7 +60,7 @@ class proxyServer(BaseHTTPRequestHandler):
     def ws_request(self, url, content):
         """Send web socket request based on HTTP request"""
 
-        global TARGET, SECURE, PROXY, DELAY
+        global TARGET, SECURE, PROXY, DELAY, CONNECTION, CONN_START, KEEP
         # Prepare proxy if provided
         if PROXY:
             proxy = self.proxy_prepare(PROXY)
@@ -91,33 +94,40 @@ class proxyServer(BaseHTTPRequestHandler):
         else:
             context = {}
 
-        try:
-            if proxy:
-                ws = create_connection('{}{}'.format(target, url), http_proxy_host=proxy[0], http_proxy_port=proxy[1], sslopt=context, header=headers)
-            else:
-                ws = create_connection('{}{}'.format(target, url), sslopt=context, header=headers)
-        except _exceptions.WebSocketBadStatusException as error:
-            if error.status_code == 404:
-                return 404
-            print('[-] Cannot connect to the host. {}'.format(error))
-            return {'error': error}
-        except _exceptions.WebSocketAddressException as error:
-            print('[-] Address exception: {}'.format(error))
-            return {'error': error}
-        except _exceptions.WebSocketConnectionClosedException as error:
-            print('[-] {}'.format(error))
-            return {'error': error}
-        except ConnectionRefusedError as error:
-            print('[-] Cannot connect to host or proxy. {}'.format(error))
-            return {'error': error}
-        except ssl.SSLError as error:
-            print('[-] SSL Error: {}'.format(error))
-            return {'error': error}
+        if CONNECTION is not None and CONNECTION.connected and datetime.now() - CONN_START > timedelta(seconds=KEEP):
+            CONNECTION.close()
 
-        sleep(DELAY)
-        ws.send(content)
-        response = ws.recv()
-        ws.close()
+        if CONNECTION is None or not CONNECTION.connected:
+            try:
+                if proxy:
+                    CONNECTION = create_connection('{}{}'.format(target, url), http_proxy_host=proxy[0], http_proxy_port=proxy[1], sslopt=context, header=headers)
+                    CONN_START = datetime.now()
+                    sleep(DELAY)
+                else:
+                    CONNECTION = create_connection('{}{}'.format(target, url), sslopt=context, header=headers)
+                    CONN_START = datetime.now()
+                    sleep(DELAY)
+            except _exceptions.WebSocketBadStatusException as error:
+                if error.status_code == 404:
+                    return 404
+                print('[-] Cannot connect to the host. {}'.format(error))
+                return {'error': error}
+            except _exceptions.WebSocketAddressException as error:
+                print('[-] Address exception: {}'.format(error))
+                return {'error': error}
+            except _exceptions.WebSocketConnectionClosedException as error:
+                print('[-] {}'.format(error))
+                return {'error': error}
+            except ConnectionRefusedError as error:
+                print('[-] Cannot connect to host or proxy. {}'.format(error))
+                return {'error': error}
+            except ssl.SSLError as error:
+                print('[-] SSL Error: {}'.format(error))
+                return {'error': error}
+
+        CONNECTION.send(content)
+        response = CONNECTION.recv()
+        # CONNECTION.close()
         return response
 
     def proxy_prepare(self, proxy=None):
@@ -156,6 +166,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='HTTP2WebSocket is Python 3 Web Socket Proxy tool to translate HTTP traffic to WebSocket application. It allows to test WebSocket app with tools like sqlmap, dirb, commix. Headers sent by you will be passed to Web Socket application.')
     parser.add_argument('-l','--listen', help='Local port to listen to.', type=int, required=True)
     parser.add_argument('-t','--target', help='Your target WebSocket application (E.g.: ws://localhost:1234)')
+    parser.add_argument('-K', '--keep', help='Keep the connection open for provided amount of seconds', type=int, default=3)
     parser.add_argument('-d', '--delay', help='The delay between opening a WS connection and sending a request', type=int, default=0)
     parser.add_argument('-P','--parameter', help='Artificial parameter for POST body. Actual content sent will be the value of this parameter. Some tools (ex: fimap) don\'t work with plain body without any parameters.')
     parser.add_argument('-v','--verbose', default=False, action='store_true', help='Shows HTTP POST body message.')
@@ -163,7 +174,10 @@ if __name__ == '__main__':
     parser.add_argument('-p','--proxy', default=False, help='HTTP proxy URL')
     args = parser.parse_args()
 
+    CONNECTION = None
+    CONN_START = 0
     TARGET = args.target
+    KEEP = args.keep
     DELAY = args.delay
     PARAMETER = args.parameter+'=' if args.parameter is not None else ''
     VERBOSE = args.verbose
